@@ -309,9 +309,48 @@ html, body {{
 ::-webkit-scrollbar-track {{ background: transparent; }}
 ::-webkit-scrollbar-thumb {{ background: {COLORS['border']}; border-radius: 0; }}
 ::-webkit-scrollbar-thumb:hover {{ background: {COLORS['accent']}; }}
+
+/* ── Mobile block ────────────────────────────────────── */
+#mobile-block .mobile-wordmark {{
+    font-family: {FONTS['display']} !important;
+}}
+
+#mobile-block {{
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: {COLORS['surface']};
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 40px 32px;
+}}
+
+@media (max-width: 768px) {{
+    #mobile-block {{
+        display: flex;
+    }}
+    .app-shell {{
+        display: none !important;
+    }}
+}}
+"""
+
+
+_MOBILE_BLOCK_HTML = f"""
+<div id="mobile-block">
+  <div class="mobile-wordmark" style="font-size:28px;color:{COLORS['text_primary']};margin-bottom:16px">Marquee</div>
+  <div style="font-size:15px;font-weight:600;color:{COLORS['text_primary']};margin-bottom:8px">Desktop only</div>
+  <div style="font-size:13px;color:{COLORS['text_muted']};line-height:1.7;max-width:280px">
+    Marquee is not available on mobile. Please open it on a desktop or laptop browser.
+  </div>
+</div>
 """
 
 
 def apply() -> None:
     ui.add_head_html(f'<link rel="stylesheet" href="{_ICONS_URL}">')
     ui.add_head_html(f"<style>{GLOBAL_CSS}</style>")
+    ui.add_body_html(_MOBILE_BLOCK_HTML)
