@@ -56,8 +56,11 @@ class FCN(Instrument):
     type: Literal[InstrumentType.FCN] = InstrumentType.FCN
     name: str
     underlying_ticker: str
-    coupon_rate: Decimal
-    barrier_pct: Decimal
+    coupon_rate: Decimal        # annual rate, e.g. 0.09 = 9%
+    barrier_pct: Decimal        # barrier as fraction of strike, e.g. 0.60
+    strike_price: Decimal       # underlying price at issuance
+    notional: Decimal           # face value per unit, e.g. 1000
+    issue_date: date
     maturity_date: date
 
     @property
@@ -65,8 +68,21 @@ class FCN(Instrument):
         return self.type
 
     @property
+    def barrier_price(self) -> Decimal:
+        return (self.strike_price * self.barrier_pct).quantize(Decimal("0.01"))
+
+    @property
     def display_name(self) -> str:
         return self.name
+
+    def mark_to_market(self, underlying_price: Decimal, pricing_date: date) -> Decimal:
+        """Simplified FCN MTM: par+accrued above barrier, capital-at-risk below."""
+        if underlying_price >= self.barrier_price:
+            days = (pricing_date - self.issue_date).days
+            accrued = self.coupon_rate * Decimal(str(days)) / Decimal("365")
+            return (self.notional * (1 + accrued)).quantize(Decimal("0.01"))
+        else:
+            return (self.notional * underlying_price / self.strike_price).quantize(Decimal("0.01"))
 
 
 class Bond(Instrument):

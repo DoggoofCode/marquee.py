@@ -31,10 +31,17 @@ _FCN_NVDA = FCN(
     underlying_ticker="NVDA",
     coupon_rate=Decimal("0.09"),
     barrier_pct=Decimal("0.60"),
+    strike_price=Decimal("135.00"),   # NVDA at issuance (Dec 2025)
+    notional=Decimal("1000.00"),
+    issue_date=date(2025, 12, 19),
     maturity_date=date(2026, 12, 19),
     currency="USD",
     isin="XS1000000001",
 )
+
+_FCN_REGISTRY: dict[str, FCN] = {
+    "FCN_NVDA": _FCN_NVDA,
+}
 
 # ── Bank / account / holdings config ─────────────────────────────────────────
 
@@ -151,16 +158,25 @@ class YFinanceConnector(BankConnector):
     async def get_positions(self, account_id: str) -> list[Position]:
         raw_holdings = _HOLDINGS.get(account_id, [])
         yf_tickers = [t for t, _, _ in raw_holdings if t in _INSTRUMENTS]
-        await _ensure_tickers(yf_tickers)
+        # Also fetch underlyings for any FCNs in this account
+        fcn_underlyings = [
+            _FCN_REGISTRY[k].underlying_ticker
+            for k, _, _ in raw_holdings
+            if k in _FCN_REGISTRY
+        ]
+        await _ensure_tickers(yf_tickers + fcn_underlyings)
 
+        today = date.today()
         account_name = next(
             (a["name"] for a in self._cfg["accounts"] if a["id"] == account_id), ""
         )
         positions = []
         for key, qty, avg_cost in raw_holdings:
-            if key == "FCN_NVDA":
-                instrument = _FCN_NVDA
-                current_price = Decimal("1000.00")   # notional par — no market quote
+            if key in _FCN_REGISTRY:
+                fcn = _FCN_REGISTRY[key]
+                underlying_price = _price_cache.get(fcn.underlying_ticker, fcn.strike_price)
+                current_price = fcn.mark_to_market(underlying_price, today)
+                instrument = fcn
             else:
                 instrument = _INSTRUMENTS[key]
                 current_price = _price_cache.get(key, Decimal("100"))
@@ -181,15 +197,28 @@ class YFinanceConnector(BankConnector):
     ) -> list[PortfolioSnapshot]:
         raw_holdings = _HOLDINGS.get(account_id, [])
         yf_tickers = [t for t, _, _ in raw_holdings if t in _INSTRUMENTS]
-        await _ensure_tickers(yf_tickers)
+        fcn_underlyings = [
+            _FCN_REGISTRY[k].underlying_ticker
+            for k, _, _ in raw_holdings
+            if k in _FCN_REGISTRY
+        ]
+        await _ensure_tickers(yf_tickers + fcn_underlyings)
 
         date_index = pd.date_range(from_date, to_date, freq="D")
         portfolio_series = pd.Series(0.0, index=date_index)
 
         for key, qty, avg_cost in raw_holdings:
-            if key == "FCN_NVDA":
-                # FCN stays at par throughout
-                portfolio_series += float(qty) * 1000.0
+            if key in _FCN_REGISTRY:
+                fcn = _FCN_REGISTRY[key]
+                ul_series = _hist_cache.get(fcn.underlying_ticker)
+                if ul_series is not None and len(ul_series) > 0:
+                    reindexed = ul_series.reindex(date_index, method="ffill").bfill()
+                    for ts in date_index:
+                        ul_price = Decimal(str(round(float(reindexed.loc[ts]), 4)))
+                        fcn_price = fcn.mark_to_market(ul_price, ts.date())
+                        portfolio_series.loc[ts] += float(fcn_price) * float(qty)
+                else:
+                    portfolio_series += float(qty) * float(fcn.notional)
                 continue
 
             series = _hist_cache.get(key)
